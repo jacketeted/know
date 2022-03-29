@@ -125,10 +125,6 @@ ul {
     padding: 5px;
 }
 
-.copy-function{
-    display: none;
-}
-
 
 .extra-function button:not(:disabled):not(.toggle-mode):not(.important):not(.search):not(.sleep) {
     opacity: .8;

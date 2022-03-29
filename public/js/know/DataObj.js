@@ -19,27 +19,24 @@ $.know.DataObj = class {
         return obj;
     }
 
-    addABlankChildAsync(knlg,orderNum,id,bindId) {
+    addABlankChildAsync(parentId, childKnlg, childId) {
 
         let dObj = {
-            id,
-            pid: this.id,
-            path: `${this.path}-${id}`,
-            orderNum,
-            knlg,
-            bindId
+            parentId,
+            childKnlg,
+            childId
         }
         return $.know.Database.addADataObjAsync(dObj)
             .then((dataObj) => this.constructor.relate(dataObj));
     }
 
-    removeBranchAsync() {
-        return $.know.Database.deleteByPathLikeAsync(this.path);
-    }
+    // removeBranchAsync() {
+    //     return $.know.Database.deleteByPathLikeAsync(this.id);
+    // }
 
     changeKnlgAsync() {
         return $.know.Database.updateADataObjAsync(this);
-        
+
     }
 
     getBranchPathsAsync() {
@@ -92,21 +89,21 @@ $.know.DataObj = class {
         this.pid = this.pid + this.becomePid(pDataObj.id);
         return $.know.Database.updateADataObjAsync(this);
     }
-    removeAParentAsync(pDataObj) {
-        let i = this.pid.indexOf(this.becomePid(pDataObj.id));
+    // removeAParentAsync(pDataObj) {
+    //     let i = this.pid.indexOf(this.becomePid(pDataObj.id));
 
-        if (i != -1) {
-            this.pid.splice(i, this.becomePid(pDataObj.id).length)
-        }
+    //     if (i != -1) {
+    //         this.pid.splice(i, this.becomePid(pDataObj.id).length)
+    //     }
 
-        return $.know.Database.updateADataObjAsync(this);
-    }
+    //     return $.know.Database.updateADataObjAsync(this);
+    // }
     // becomePid(id) {
     //     return `(${id})`;
     // }
 
-    async updateKnlgsByBindIdAsync(){
-        return await $.know.Database.updateKnlgsByBindIdAsync(this.knlg,this.bindId);
+    async updateKnlgsByBindIdAsync() {
+        return await $.know.Database.updateKnlgsByBindIdAsync(this.knlg, this.bindId);
     }
 
 }
@@ -118,25 +115,25 @@ $.know.Database = class {
 
     static getDataObjsByPidAsync(pid) {
         return $.ajax({
-            url: `/know/v1/dataObjs/pid/${pid}`,
+            url: `/know/v1/children/id/${pid}`,
             method: 'get',
             type: 'json'
         })
             .then(dataObjs => dataObjs)
     }
 
-    static deleteByPathLikeAsync(path) {
+    static deleteSelfAsync(id) {
         return $.ajax({
-            url: `/know/v1/dataObjs/pathLike/${path}`,
+            url: `/know/v1/self/id/${id}`,
             method: 'delete',
         })
     }
 
     static updateADataObjAsync(dataObj) {
         return $.ajax({
-            url: `/know/v1/dataObj`,
+            url: `/know/v1/self`,
             method: 'put',
-            data: { id: dataObj.id, knlg: dataObj.knlg, pid: dataObj.pid, path: dataObj.path },
+            data: { id: dataObj.id, knlg: dataObj.knlg },
             type: 'json'
         })
     }
@@ -151,7 +148,7 @@ $.know.Database = class {
 
     static addADataObjAsync(dObj) {
         return $.ajax({
-            url: `/know/v1/dataObj`,
+            url: `/know/v1/child`,
             method: 'post',
             data: dObj,
             type: 'json'
@@ -211,6 +208,13 @@ $.know.Database = class {
             method: 'get'
         });
     }
+    static changeParentAsync(id, newParentId) {
+        return $.ajax({
+            url: `/know/v1/changeParent`,
+            method: 'put',
+            data: { id, newParentId }
+        });
+    }
 
     static exportAsync() {
         return $.ajax({
@@ -224,36 +228,186 @@ $.know.Database = class {
             method: 'get'
         });
     }
-    static copyDataObjsAsync(id,knlg,newPPath,newPId) {
+    static copyDataObjsAsync(id, knlg, newPPath, newPId) {
         return $.ajax({
             url: `/know/v1/copyDataObjs`,
             method: 'post',
-            data:{id,knlg,newPPath,newPId}
+            data: { id, knlg, newPPath, newPId }
         });
     }
 
-    static async updateKnlgsByBindIdAsync(knlg,bindId){
+    static async updateKnlgsByBindIdAsync(knlg, bindId) {
         return await $.ajax({
-            url:'/know/v1/knlgsByBindId',
-            method:'put',
-            data:{knlg,bindId}
+            url: '/know/v1/knlgsByBindId',
+            method: 'put',
+            data: { knlg, bindId }
         })
     }
 
-    static async deleteDataObjsByPathLikeAndBindIdAsync(pid,path,bindId){
+    static async deleteDataObjsByPathLikeAndBindIdAsync(pid, path, bindId) {
         return await $.ajax({
-            url:`/know/v1/dataObjs/pathLikeAndBindId`,
-            method:'delete',
-            data:{pid,path,bindId}
+            url: `/know/v1/dataObjs/pathLikeAndBindId`,
+            method: 'delete',
+            data: { pid, path, bindId }
+        })
+    }
+
+}
+
+
+class Database {
+
+    static getChildrenAsync(id) {
+        return $.ajax({
+            url: `/know/v1/children/id/${id}`,
+            method: 'get',
+            type: 'json'
+        })
+            .then(dataObjs => dataObjs)
+    }
+
+    static deleteSelfAsync(id) {
+        return $.ajax({
+            url: `/know/v1/self/id/${id}`,
+            method: 'delete',
         })
     }
 
 
+    static getPathsByPathLikeAsync(path) {
+        return $.ajax({
+            url: `/know/v1/paths/pathLike/${path}`,
+            method: 'get',
+            type: 'json'
+        })
+            .then(dataObj => dataObj)
+    }
+
+    static addAChildAsync(parentId, childKnlg) {
+
+        return $.ajax({
+            url: `/know/v1/child`,
+            method: 'post',
+            data: { parentId, childKnlg},
+            type: 'json'
+        })
+    }
+
+    static getDataObjsByPathLikeAsync(path) {
+        return $.ajax({
+            url: `/know/v1/dataObjs/pathLike/${path}`,
+            method: 'get',
+            type: 'json'
+        });
+    }
+    static idAsync() {
+        return $.ajax({
+            url: `/know/v1/id`,
+            method: 'get',
+            type: 'json'
+        });
+    }
+    static getUniqueBindIdAsync() {
+        return $.ajax({
+            url: `/know/v1/uniqueBindId`,
+            method: 'get',
+            type: 'json'
+        });
+    }
+
+    static getPathsByBindIdAsync(bindId) {
+        return $.ajax({
+            url: `/know/v1/paths/bindId/${bindId}`,
+            method: 'get',
+            type: 'json'
+        })
+    }
 
 
+    static updateDataObjsAsync(arr) {
+        return $.ajax({
+            url: `/know/v1/dataObjs`,
+            method: 'put',
+            data: { myStr: JSON.stringify(arr) }
+        });
+    }
+    static addDataObjsAsync(arr) {
+        return $.ajax({
+            url: `/know/v1/dataObjs`,
+            method: 'post',
+            data: { myStr: JSON.stringify(arr) }
+        });
+    }
+
+    static getAllDataObjsAsync() {
+        return $.ajax({
+            url: `/know/v1/dataObjs`,
+            method: 'get'
+        });
+    }
 
 
+    static exportAsync() {
+        return $.ajax({
+            url: `/know/v1/export`,
+            method: 'get'
+        });
+    }
+    static importAsync() {
+        return $.ajax({
+            url: `/know/v1/import`,
+            method: 'get'
+        });
+    }
+    static copyDataObjsAsync(id, knlg, newPPath, newPId) {
+        return $.ajax({
+            url: `/know/v1/copyDataObjs`,
+            method: 'post',
+            data: { id, knlg, newPPath, newPId }
+        });
+    }
 
+    static async updateKnlgsByBindIdAsync(knlg, bindId) {
+        return await $.ajax({
+            url: '/know/v1/knlgsByBindId',
+            method: 'put',
+            data: { knlg, bindId }
+        })
+    }
+
+    static async deleteDataObjsByPathLikeAndBindIdAsync(pid, path, bindId) {
+        return await $.ajax({
+            url: `/know/v1/dataObjs/pathLikeAndBindId`,
+            method: 'delete',
+            data: { pid, path, bindId }
+        })
+    }
+
+    static async copyAndBindAsync(id, newParentId) {
+        return await $.ajax({
+            url: `/know/v1/copyAndBind`,
+            method: 'post',
+            data: { id, newParentId }
+        })
+    }
+
+    static changeParentAsync(id, newParentId) {
+        return $.ajax({
+            url: `/know/v1/changeParent`,
+            method: 'put',
+            data: { id, newParentId }
+        });
+    }
+
+    static changeKnlgAsync(id,knlg) {
+
+        return $.ajax({
+            url: `/know/v1/self`,
+            method: 'put',
+            data: { id, knlg },
+            type: 'json'
+        })
+    }
 
 }
 

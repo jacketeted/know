@@ -1,8 +1,9 @@
 //dataObj也可以设置成没有()的样子
 
+'use strict';
+
 class AutoId {
-    id
-    constructor() { }
+    id = 0;
 
     init(id) {
         this.id = Number(id);
@@ -11,21 +12,61 @@ class AutoId {
         return this.id++;
     }
 }
+class IdMap extends Map {
+
+    idsToBranches(idArr) {
+        let branchArr = [];
+        idArr.forEach(id => {
+            let branch = this[id];
+
+            if (branch) branchArr.push(branch);
+        })
+
+        return branchArr;
+    }
+}
 
 $.know.Branch = class {
 
-    static idAllocator = new AutoId();
 
+    static bindIdToArr = new Map();
     static bindIdAllocator = new AutoId();
-
+    static idAllocator = new AutoId();
+    static idMap = new IdMap();
     static mainBranch = null;
     static _toggleMode = false;
+
+
+    bindArr = null;
+    children = [];
+    _content = '';
+    _parsedData = null;
+    _knlg = '';
+    _dataObj = null;
+    _parent = null;
+
+
+
+
+    get knlg() {
+        return this._knlg;
+    }
+
+    get parsedData() {
+        return this._parsedData;
+    }
+
+
+
+
+    get parent() {
+        return this._parent;
+    }
+
     static set toggleMode(value) {
         this._toggleMode = value;
 
-        // this.mainBranch.offSpringsAndSelf.forEach(branch => {
-        //     branch.updateContent();
-        // })
+
         this.allBranches.forEach(branch => {
             branch.updateContent();
         })
@@ -59,7 +100,7 @@ $.know.Branch = class {
 
 
     //必须传入完整dataObj
-    constructor(dataObj) {
+    constructor(dataObj, parent) {
         this.$elem = $(`
             <li class="branch">
                 <div class="tab">
@@ -70,7 +111,7 @@ $.know.Branch = class {
                 <ul></ul>
             </li>`);
 
-        this.configNewSelf(dataObj);
+        this.configNewSelf(dataObj, parent);
     }
 
 
@@ -78,12 +119,43 @@ $.know.Branch = class {
         this.$elem.prop('branch', this);
     }
 
+    async copyAndBindToAsync(newParentBranch) {
+        if (newParentBranch.isOffspringOf(this) || newParentBranch === this) {
+            alert('操作不允许')
+            return emptyPromise;
+        }
+        await newParentBranch.expandChildBranchesAsync();
 
-    //初始化时放入数组
-    static bindIdToList = {}
-    bindList = null;
+
+        let { updateArr, newId } = await Database.copyAndBindAsync(this.id, newParentBranch.id);
 
 
+
+        updateArr.forEach(obj => {
+            let branch = this.constructor.idMap[obj.id];
+            console.log('branch    ', branch)
+
+            //有些还没展开
+            if (branch) {
+                this.constructor.bindIdToArr[obj.bindId] = branch.bindArr = [branch]
+            }
+
+        })
+
+        //现在this.bindArr一定有值了
+
+
+        let newMainBranch = new this.constructor({
+            id: newId,
+            knlg: this.knlg,
+            cid: this.hasChild
+        }, newParentBranch);
+        newMainBranch.bindArr = this.bindArr;
+
+        newMainBranch.bindArr.push(newMainBranch);
+        newParentBranch.addAChildBranch(newMainBranch)
+
+    }
 
     static from$elem($elem) {
         return $elem.prop('branch');
@@ -97,7 +169,7 @@ $.know.Branch = class {
     }
 
     get childBranchCount() {
-        return this.getUl().children().length;
+        return this.children.length;
     }
 
     set content(value) {
@@ -118,13 +190,7 @@ $.know.Branch = class {
         return this.getTab().children('.indicator');
     }
 
-    get parentBranch() {
-        return this.constructor.from$elem(
-            this.$elem.parent().parent()
-        );
-    }
 
-    _dataObj = null
     get dataObj() {
         return this._dataObj;
     }
@@ -206,10 +272,21 @@ $.know.Branch = class {
         return this._hasChild;
     }
 
+    _id
+    get id() {
+        return this._id;
+    }
 
-    configNewSelf(dataObj) {
+    configNewSelf(dataObj, parent) {
 
         //在$elem的prop中放入branch
+
+        this._id = dataObj.id;
+        this._parent = parent;
+        this._knlg = dataObj.knlg;
+
+
+
         this.bind$elem();
         this.dataObj = dataObj;
         this.hasChild = Boolean(this.dataObj.cid);
@@ -217,15 +294,23 @@ $.know.Branch = class {
         //可以少一个请求,避免冲突
         if (!this.hasChild) this._childContructed = true;
 
-        this.extraData = $.know.ParsedData.parse(dataObj);
+        this._parsedData = $.know.ParsedData.parse(dataObj);
         this.updateContent();
         this.updateIndicatorStyle()
 
         this.constructor.idMap[this.dataObj.id] = this;
 
+        if (this.dataObj.bindId) {
 
+            this.bindArr = this.constructor.bindIdToArr[dataObj.bindId];
 
-        // this.makeTab($.know.ParsedData.parse(dataObj));
+            if (!this.bindArr) {
+                this.constructor.bindIdToArr[dataObj.bindId] = this.bindArr = [this];
+            } else {
+                this.bindArr.push(this);
+            }
+        }
+
     }
     childLinks = {}
 
@@ -240,10 +325,9 @@ $.know.Branch = class {
         delete this.childLinks[branch.dataObj.id];
     }
 
-    //declarative tab中设置一个hasChild变量绑定has-child样式
+
 
     expandByidsAsync(idsArr) {
-        console.log(idsArr)
         idsArr = idsArr.join('-').split('-');
         let i = idsArr.indexOf(String(this.dataObj.id));
 
@@ -255,9 +339,7 @@ $.know.Branch = class {
         function expandAsync() {
             if (i < idsArr.length) {
                 return branch.expandChildBranchesAsync().then(() => {
-                    console.log(idsArr[i])
                     branch = branch.getChildBranchById(idsArr[i]);
-                    console.log(branch)
                     i++;
                     return expandAsync();
                 })
@@ -286,12 +368,10 @@ $.know.Branch = class {
     //最好改成promise并发
     constructChildBranchesAsync() {
 
-        return $.know.DataObj
-            .getDataObjsByPidAsync(this.dataObj.id)
+        return Database.getChildrenAsync(this.id)
             .then((arr) => {
-
                 let branches = arr.map(dataObj => {
-                    return new this.constructor(dataObj);
+                    return new this.constructor(dataObj, this);
                 })
 
                 this.addChildBranches(branches);
@@ -302,13 +382,17 @@ $.know.Branch = class {
 
 
     addAChildBranch(childBranch) {
-
+        this.children.push(childBranch)
         this.addAChildBranchLink(childBranch)
         this.hasChild = true;
         this.getUl().append(childBranch.$elem);
 
     }
     addChildBranches(childBranches) {
+
+        childBranches.forEach(branch => {
+            this.children.push(branch);
+        })
 
         let $elems = childBranches.map(branch => {
             this.addAChildBranchLink(branch);
@@ -325,21 +409,32 @@ $.know.Branch = class {
     removeAChildBranch(childBranch) {
 
         this.removeAChildBranchLink(childBranch);
+        this.children.splice(this.children.indexOf(childBranch), 1);
         childBranch.$elem.remove();
         this.hasChild = this.childBranchCount;
 
-        if (childBranch.bindList) {
-            childBranch.offSpringsAndSelf.forEach(branch => {
+
+        childBranch.offSpringsAndSelf.forEach(branch => {
+            if (branch.bindList) {
                 branch.removeSelfFromBindList();
-            })
-        }
+            }
+
+        })
+
 
     }
 
 
+
+
     giveAChildBranchTo(childBranch, newParentbranch) {
+
+
+        this.children.splice(this.children.indexOf(childBranch), 1);
+        childBranch._parent = newParentbranch;
         newParentbranch.addAChildBranch(childBranch);
         this.removeAChildBranchLink(childBranch);
+
         this.hasChild = this.childBranchCount;
 
 
@@ -348,15 +443,15 @@ $.know.Branch = class {
 
 
     updateIndicatorStyle() {
-        let extraData = this.extraData;
+        let parsedData = this.parsedData;
         let colorArr = []
-        if (extraData.example) {
+        if (parsedData.example) {
             colorArr.push('red')
         }
-        if (extraData.toggle) {
+        if (parsedData.toggle) {
             colorArr.push('orange')
         }
-        if (extraData.source) {
+        if (parsedData.source) {
             colorArr.push('green')
         }
 
@@ -377,137 +472,167 @@ $.know.Branch = class {
 
 
 
-    createABlankChildBranchAsync() {
+    async createABlankChildBranchAsync() {
 
-        let id = this.constructor.idAllocator.alloc();
-        //需要先有nextId才能有这个
+        // let childId = this.constructor.idAllocator.alloc();
 
-        return this.dataObj
-            .addABlankChildAsync(
-                '',
-                this.childBranchCount + 1,
-                id
-            )
-            .then((dataObj) => {
-                return new this.constructor(dataObj);
-            });
+        let {childBranchList, hasChildIds}=await Database.addAChildAsync(this.id, '');
+        console.log('childBranchList      ',childBranchList)
+        console.log('hasChildIds      ',hasChildIds)
+        // return new this.constructor({ id: childId, knlg: '' }, this);
+        childBranchList.forEach(obj=>{
+            let pBranch=this.constructor.idMap[obj.pid];
+            if(pBranch&&pBranch.childConstructed){
+                pBranch.addAChildBranch(new this.constructor(obj,pBranch));
+            }
+        })
+        hasChildIds.forEach(id=>{
+            let branch=this.constructor.idMap[id];
+            if(branch){
+                branch.hasChild=true;
+            }
+        })
 
     }
 
     async addABlankChildBranchAsync() {
 
 
+        // if (this.dataObj.bindId) {
+
+        //     for (let branch of this.bindList) {
+        //         await branch.expandChildBranchesAsync();
+        //     }
+
+        //     let arr = await $.know.Database.getPathsByBindIdAsync(this.dataObj.bindId)
+
+        //     let bindId = this.constructor.bindIdAllocator.alloc();
+        //     let newArr = arr.map(dataObj => {
+        //         let id = this.constructor.idAllocator.alloc();
+        //         return {
+        //             id,
+        //             knlg: '',
+        //             path: `${dataObj.path}-${id}`,
+        //             pid: dataObj.id,
+        //             bindId
+        //         }
+        //     })
+
+        //     await $.know.Database.addDataObjsAsync(newArr);
+
+        //     for (let branch of this.bindList) {
+        //         newArr.forEach(dataObj => {
+        //             if (dataObj.pid == branch.dataObj.id) {
+        //                 branch.addAChildBranch(new this.constructor($.know.DataObj.relate(dataObj)))
+        //             }
+        //         })
+        //     }
+        //     return;
+        // }
+
+
         await this.expandChildBranchesAsync()
         let childBranch = await this.createABlankChildBranchAsync()
 
-        this.addAChildBranch(childBranch);
-        this.constructor.unselectAllBranches();
-        childBranch.select();
+        // this.addAChildBranch(childBranch);
+        // this.constructor.unselectAllBranches();
+        // childBranch.select();
 
     }
 
 
-    static idMap = new Map();
+
+    // static idMap = new Map();
 
     //完美的例子,先后台函数,再前台函数
-    async removeSelfAsync() {
+    async deleteSelfAsync() {
 
-        await this.dataObj.removeBranchAsync();
-        this.parentBranch.removeAChildBranch(this);
+        let {delArr,notHasChildArr}=await Database.deleteSelfAsync(this.id);
+        console.log('notHasChildArr   ',notHasChildArr)
+
+        delArr.forEach(id=>{
+            let branch=this.constructor.idMap[id];
+            if(branch){
+                branch.parent.removeAChildBranch(branch)
+            }
+        })
+        notHasChildArr.forEach(id=>{
+            let branch=this.constructor.idMap[id];
+            if(branch){
+                branch.hasChild=false;
+            }
+        })
+        // this.parent.removeAChildBranch(this);
+
 
     }
 
-    async changeContentAsync(text) {
+    async contentAsync(text) {
 
         //解析text
         this.dataObj.knlg = text;
 
-        this.extraData = $.know.ParsedData.firstParse(this.dataObj);
 
-        await this.dataObj.changeKnlgAsync()
+        this._parsedData = $.know.ParsedData.firstParse(this.dataObj);
+
+        if (this.dataObj.bindId) {
+            await this.dataObj.updateKnlgsByBindIdAsync()
+
+            this.bindList.forEach(branch => {
+                branch.parsedData = this.parsedData;
+                branch.dataObj.knlg = this.dataObj.knlg;
+                branch.updateContent();
+                branch.updateIndicatorStyle();
+            })
+        }
+
+        await Database.changeKnlgAsync(this.id,this.dataObj.knlg)
         this.updateContent();
         this.updateIndicatorStyle();
     }
-    _extraData = null
-    set extraData(value) {
-        this._extraData = value;
 
-    }
-    get extraData() {
-        return this._extraData;
-    }
 
     updateContent() {
         if (this.constructor.toggleMode &&
-            Boolean(this.extraData.toggle)) {
+            Boolean(this.parsedData.toggle)) {
 
-            this.content = this.extraData.toggle;
+            this.content = this.parsedData.toggle;
         } else {
-            this.content = this.extraData.mainText;
+            this.content = this.parsedData.mainText;
         }
     }
 
 
     isOffspringOf(branch) {
-        return this.dataObj.isOffspringOf(branch.dataObj);
+
+        let tempBranch = this.parent;
+
+        while (tempBranch) {
+            if (tempBranch == branch) return true;
+            tempBranch = tempBranch.parent;
+        }
+
+        return false;
     }
 
-    m_moveTo(newParentBranch) {
-        let oldParentBranch = this.parentBranch;
-        newParentBranch.addAChildBranch(this);
-        oldParentBranch.removeAChildBranch(this);
 
+    async parentAsync(newParent) {
 
-    }
-
-    moveToAsync(newParentBranch) {
-        if (newParentBranch.isOffspringOf(this) || newParentBranch === this) {
+        if (newParent.isOffspringOf(this) || newParent === this) {
             alert('操作不允许')
             return emptyPromise;
         }
 
-        let oldAncestorDataObj = this.parentBranch.dataObj;
-        let newAncestorDataObj = newParentBranch.dataObj;
+        await newParent.expandChildBranchesAsync()
+        await $.know.Database.changeParentAsync(this.id, newParent.id);
+        this.parent.giveAChildBranchTo(this, newParent);
 
-        return newParentBranch.expandChildBranchesAsync()
-            .then(() => {
-                return this.dataObj.getBranchPathsAsync()
-            })
-
-            .then((arr) => {
-
-                arr.forEach(dataObj => {
-                    dataObj.changePath(oldAncestorDataObj, newAncestorDataObj);
-                })
-                arr.push({
-                    id: this.dataObj.id,
-                    pid: newParentBranch.dataObj.id
-                })
-                return this.dataObj.constructor.updateDatasAsync(arr);
-
-            })
-            .then(() => {
-
-                this.offSpringsAndSelf.forEach(branch => {
-                    console.log(branch.dataObj.path)
-                    branch.dataObj.changePath(oldAncestorDataObj, newAncestorDataObj);
-                    console.log(branch.dataObj.path)
-                })
-
-
-                //父元素的属性也要改
-                this.dataObj.pid = newParentBranch.dataObj.id;
-                // this.dataObj.changePath(oldAncestorDataObj, newAncestorDataObj);
-
-                this.parentBranch.giveAChildBranchTo(this, newParentBranch);
-
-            })
     }
 
     static async createRootAsync() {
         let $ul = $('<ul></ul>');
 
-        let arr = await $.know.DataObj.getDataObjsByPidAsync(0)
+        let arr = await Database.getChildrenAsync(0)
 
         let $elems = arr.map(dataObj => {
 

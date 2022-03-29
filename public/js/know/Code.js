@@ -27,7 +27,7 @@ colorRule.set('keyword', /\b(function|let|new|null|class|async)\b/, (kw) => {
     return `<span class="keyword">${kw}</span>`;
 })
 
-colorRule.set('htmlTab', /<[^/!][^><]*(?=>)/, (kw) => {
+colorRule.set('htmlTab', /<[^/!][^>]*(?=>)/, (kw) => {
     return htmlTabColorRule.execute(kw);
 })
 

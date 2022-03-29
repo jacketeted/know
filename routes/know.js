@@ -5,30 +5,463 @@ const fs = require('fs')
 
 let router = express.Router();
 
-//获取子元素的数据及子元素中含有的第一个子元素
-router.get('/v1/dataObjs/pid/:pid', async (req, res) => {
-    res.header('Access-Control-Allow-Origin', '*');
 
-    let $pid = req.params.pid;
 
-    let sql = 'SELECT `id`,`knlg`,`pid`,`path`,`orderNum`,`bindId`,(SELECT `id` FROM `know` WHERE `pid`=parent.id limit 1) AS `cid` FROM `know` AS parent WHERE `pid`=? ORDER BY `orderNum`';
+class IdAllocator {
+    id = 0;
 
-    let result = await queryAsync(sql, [$pid]);
+    init(id) {
+        this.id = Number(id);
+    }
+    alloc() {
+        return this.id++;
+    }
+}
 
-    res.send(result);
+
+let idAllocator;
+let bindIdAllocator;
+
+async function init() {
+    idAllocator = new IdAllocator();
+    let [{ id }] = await queryAsync(`SELECT AUTO_INCREMENT id FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA ='${pool.database}' AND TABLE_NAME='know'`);
+    idAllocator.init(id);
+
+    bindIdAllocator = new IdAllocator();
+    let [{ bindId }] = await queryAsync('SELECT MAX(`bindId`) `bindId` FROM `know`');
+    bindIdAllocator.init(bindId ? bindId + 1 : 1)
+}
+
+
+class Branch {
+
+    id = 0;
+
+
+
+
+    constructor(id) {
+        this.id = Number(id);
+    }
+    async getChildrenAsync() {
+        let sql = 'SELECT `id`,`knlg`,`bindId`,(SELECT `id` FROM `know` WHERE `pid`=parent.id limit 1) AS `cid` FROM `know` AS parent WHERE `pid`=? ORDER BY `orderNum`';
+
+        return await queryAsync(sql, [this.id]);
+    }
+
+    async addAChildAsync(childKnlg) {
+
+
+        let [{ childCount }] = await queryAsync('SELECT COUNT(id) childCount FROM `know` WHERE `pid`=?', [this.id]);
+
+        let [{ parentPath }] = await queryAsync('SELECT `path` parentPath FROM `know` WHERE `id`=?', [this.id]);
+
+        let childId = idAllocator.alloc()
+        let obj = {
+            id: childId,
+            knlg: childKnlg,
+            pid: this.id,
+            orderNum: childCount + 1,
+            path: `${parentPath}-${childId}`
+
+        }
+        await queryAsync('INSERT INTO `know` SET ?', [obj]);
+        return obj;
+    }
+    async changeKnlgAsync(knlg) {
+
+        return await queryAsync('UPDATE `know` SET knlg=? WHERE `id`=?', [knlg, this.id]);
+
+    }
+
+    async deleteSelfAsync() {
+
+
+
+
+        let [{ path, pid, bindId }] = await queryAsync('SELECT `path`,`bindId`,`pid` FROM `know` WHERE `id`=?', [this.id]);
+
+        let [{ oriPBindId }] = await queryAsync('SELECT `bindId` oriPBindId FROM `know` WHERE `id`=?', [pid])
+
+        let delArr = [];
+        let notHasChildArr = [];
+
+        //存放可能要更新的bindId
+        let updateArr = await queryAsync('SELECT `bindId` FROM `know` WHERE `path` LIKE ?', [path + '%']);
+        await queryAsync('DELETE FROM `know` WHERE `path` LIKE ?', [path + '%']);
+
+        delArr.push(this.id);
+
+        //判断父分支是否还有子元素
+        let childArr = await queryAsync('SELECT `id` FROM `know` WHERE `pid`=? LIMIT 1', [pid]);
+        if (childArr.length == 0) {
+
+            notHasChildArr.push(pid)
+        }
+
+
+
+        if (bindId) {
+            let bindBranches = await queryAsync('SELECT `id`,`path`,`pid` FROM `know` WHERE `bindId`=?', [bindId]);
+            for (let obj of bindBranches) {
+
+                let [{ pBindId }] = await queryAsync('SELECT `bindId` pBindId FROM `know` WHERE `id`=?', [obj.pid]);
+
+                //只要父元素是绑定同样的就直接删除
+                if (pBindId && (pBindId == oriPBindId)) {
+                    await queryAsync('DELETE FROM `know` WHERE `path` LIKE ?', [obj.path + '%']);
+                    delArr.push(obj.id)
+                    let childArr = await queryAsync('SELECT `id` FROM `know` WHERE `pid`=? LIMIT 1', [obj.pid]);
+                    if (childArr.length == 0) {
+
+                        notHasChildArr.push(obj.pid)
+                    }
+                }
+            }
+        }
+
+
+
+        for (let obj of updateArr) {
+            if (obj.bindId) {
+
+                let [{ count }] = await queryAsync('SELECT COUNT(id) count FROM `know` WHERE `bindId` = ?', [obj.bindId]);
+                if (count == 1) {
+                    await queryAsync('UPDATE `know` SET `bindId`=NULL WHERE `bindId` = ?', [obj.bindId]);
+                }
+            }
+        }
+
+        return { delArr, notHasChildArr };
+
+    }
+
+    async parentAsync(newParentId) {
+
+        let [{ path, pid }] = await queryAsync('SELECT `path`,`pid` FROM `know` WHERE `id`=?', [this.id]);
+        let arr = await queryAsync('SELECT `id`,`path` FROM `know` WHERE `path` LIKE ?', [path + '%'])
+        let [{ oldAncestorPath }] = await queryAsync('SELECT `path` oldAncestorPath FROM `know` WHERE `id` = ?', [pid])
+        let [{ newAncestorPath }] = await queryAsync('SELECT `path` newAncestorPath FROM `know` WHERE `id` = ?', [newParentId])
+
+
+        let sql = 'UPDATE `know` SET `path` = ? WHERE id=?'
+        await Promise.all(arr.map(async obj => {
+            return queryAsync(sql, [
+                newAncestorPath + obj.path.slice(oldAncestorPath.length),
+                obj.id
+            ])
+        }))
+
+        await queryAsync('UPDATE `know` SET `pid` = ? WHERE id = ?', [newParentId, this.id])
+    }
+
+    async offspringsAndSelfAsync(path) {
+
+        return await queryAsync('SELECT * FROM `know` WHERE `path` LIKE ?', [path + '%'])
+    }
+
+
+    async copyAndBindAsync(newParentId) {
+        // let [{ id }] = await queryAsync(`SELECT AUTO_INCREMENT id FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA ='${pool.database}' AND TABLE_NAME='know'`);
+
+        let [{ pid, path }] = await queryAsync('SELECT `path`,`pid` FROM `know` WHERE `id`=?', [this.id]);
+
+        let [{ oldAncestorPath }] = await queryAsync('SELECT `path` oldAncestorPath FROM `know` WHERE `id` = ?', [pid])
+        let [{ newAncestorPath }] = await queryAsync('SELECT `path` newAncestorPath FROM `know` WHERE `id` = ?', [newParentId])
+
+        let arr = await this.offspringsAndSelfAsync(path);
+
+        let idMap = new Map();
+        //把新id和旧id放入映射
+        arr.forEach(obj => {
+            idMap[obj.id] = idAllocator.alloc();
+        })
+
+        //添加ancestorId的映射
+        idMap[pid] = newParentId;
+
+        let updateArr = [];
+
+        arr.forEach(obj => {
+            //这边要+1因为要去掉'-'
+            let idListPath = obj.path.slice(oldAncestorPath.length + 1).split('-');
+
+            idListPath.forEach((id, i, arr) => {
+                arr[i] = idMap[Number(id)];
+            })
+            obj.path = `${newAncestorPath}-${idListPath.join('-')}`
+            obj.pid = idMap[obj.pid]
+
+            // 这里处理时obj.id还没有改
+            if (!obj.bindId) {
+                obj.bindId = bindIdAllocator.alloc();
+                updateArr.push({
+                    id: obj.id,
+                    bindId: obj.bindId
+                })
+            }
+
+            obj.id = idMap[obj.id];
+        })
+        await Promise.all(arr.map(obj => {
+            return queryAsync('INSERT INTO `know` SET ?', [obj])
+        }))
+        await Promise.all(updateArr.map(obj => {
+            return queryAsync('UPDATE `know` SET ? WHERE `id`=?', [obj, obj.id])
+        }))
+
+        return { updateArr, newId: idMap[this.id] };
+
+
+    }
+
+
+};
+
+
+class Branch1 {
+    bindId;
+    id;
+    knlg;
+    orderNum;
+    path;
+    pid;
+    hasChild;
+
+    static async fromIdAsync(id) {
+        let [obj] = await queryAsync('SELECT id,pid,knlg,orderNum,path,bindId,hasChild FROM know WHERE id=?', id);
+        this.wrap(obj);
+        return obj;
+    }
+    static wrap(obj) {
+        Object.setPrototypeOf(obj, this.prototype);
+        return obj;
+    }
+    static async parentAsync() {
+        return await this.constructor.fromIdAsync(this.pid);
+    }
+    async deleteSelfAsync() {
+        let parent = await this.parentAsync();
+        await queryAsync('DELETE FROM `know` WHERE `path` LIKE ?', [this.path + '%']);
+        let pHasChild = await parent.checkHasChildAsync();
+        await parent.setHasChildAsync(pHasChild);
+    }
+    async delSfAndUpdBindAsync() {
+        // let this.offspringsAndSelfAsync
+        let parent = await this.parentAsync();
+        await queryAsync('DELETE FROM `know` WHERE `path` LIKE ?', [this.path + '%']);
+        let pHasChild = await parent.checkHasChildAsync();
+        await parent.setHasChildAsync(pHasChild);
+    }
+    async childCountAsync() {
+        let [{ childCount }] = await queryAsync('SELECT COUNT(id) childCount FROM `know` WHERE `pid`=?', [this.id])
+        return childCount;
+    }
+    async checkHasChildAsync() {
+        let arr = await queryAsync('SELECT `id` FROM `know` WHERE `pid`=? LIMIT 1', [this.id])
+        return arr.length > 0;
+    }
+    async addAChildAsync(knlg, bindId = null) {
+        let childCount = await this.childCountAsync();
+
+        let branch = new Branch();
+        branch.knlg = knlg;
+        branch.id = idAllocator.alloc();
+        branch.pid = this.id;
+        branch.orderNum = childCount + 1;
+        branch.path = `${this.path}-${branch.id}`;
+        branch.hasChild = 0;
+        branch.bindId = bindId;
+
+        await queryAsync('INSERT INTO `know` SET ?', [branch])
+        await this.setHasChildAsync(true);
+        return branch;
+    }
+    async setHasChildAsync(hasChild) {
+        if (hasChild == this.hasChild) return;
+        await queryAsync('UPDATE `know` SET hasChild=? WHERE id=?', [Number(hasChild), this.id])
+    }
+
+    async offspringsAndSelfAsync(){
+        let arr = await queryAsync('SELECT id,pid,knlg,orderNum,path,bindId,hasChild FROM know WHERE path LIKE ?', this.path+'%');
+        arr.forEach(obj=>{
+            this.constructor.wrap(obj);
+        })
+        return arr;
+    }
+
+
+
+}
+
+
+class BindBranchList {
+    branchList;
+    static async fromBranchAsync(branch) {
+        let bindBranchList = new this();
+        let bindId = branch.bindId;
+
+        let arr = await queryAsync('SELECT id,pid,knlg,orderNum,path,bindId,hasChild FROM know WHERE bindId=?', bindId);
+        arr.forEach(obj => {
+            Branch1.wrap(obj);
+        })
+
+        bindBranchList.branchList = arr;
+        return bindBranchList;
+    }
+
+    async addAChildAsync(knlg) {
+
+        let childBranchList = []
+        let hasChildIds = []
+        let bindId = bindIdAllocator.alloc();
+        for (let branch of this.branchList) {
+
+            if (!branch.hasChild) {
+                hasChildIds.push(branch.id);
+            }
+            let childBranch = await branch.addAChildAsync(knlg, bindId);
+            childBranchList.push(childBranch);
+
+        }
+        return { childBranchList, hasChildIds };
+    }
+
+    async deleteSelfAsync(mainBranch){
+        this.rmABranchById(mainBranch.id);
+        // console.log('mainBranch   ',mainBranch)
+        // console.log('this.branchList   ',this.branchList)
+        let arr=await mainBranch.offspringsAndSelfAsync();
+        arr.forEach(obj=>{
+            if(obj.bindId){
+                bindIds.push(obj.bindId);
+            }
+        })
+        
+        let bindIds=[];
+        arr.forEach(obj=>{
+            if(obj.bindId){
+                bindIds.push(obj.bindId);
+            }
+        })
+
+        console.log(bindIds)
+
+
+    }
+
+    rmABranchById(id){
+        this.branchList.some((obj,i,arr)=>{
+            if(obj.id==id){
+                arr.splice(i,1)
+                return true;
+            }
+        })
+    }
+
+
+
+
+
+
+}
+
+
+
+
+//获取子分支, 及子分支是否含有子分支
+router.get('/v1/children/id/:id', async (req, res) => {
+
+    let arr = await new Branch(req.params.id).getChildrenAsync();
+    res.send(arr)
 
 });
 
 //插入数据
-//暂时不做插入是否成功的判断
-router.post('/v1/dataObj', async (req, res) => {
-    let obj = req.body;
-    let sql = 'INSERT INTO `know` SET ?';
+router.post('/v1/child', async (req, res) => {
+    let { parentId, childKnlg } = req.body;
 
-    await queryAsync(sql, [obj]);
-    res.send(obj);
+    let branch = await Branch1.fromIdAsync(parentId);
+    if (branch.bindId) {
+        let bindBranchList = await BindBranchList.fromBranchAsync(branch);
+
+        let result = await bindBranchList.addAChildAsync(childKnlg);
+        res.send(result)
+
+    } else {
+        let hasChildIds = [];
+        if (!branch.hasChild) {
+            hasChildIds.push(branch.id);
+        }
+        let childBranch = await branch.addAChildAsync(childKnlg);
+        res.send({ childBranchList: [childBranch], hasChildIds })
+    }
 
 });
+
+
+// 修改知识内容
+router.put('/v1/self', async (req, res) => {
+    let { id, knlg } = req.body;
+
+    await new Branch(id).changeKnlgAsync(knlg);
+    res.send('1');
+})
+
+//删除分支
+router.delete('/v1/self/id/:id', async (req, res) => {
+    let { id } = req.params;
+
+    let branch = await Branch1.fromIdAsync(id);
+    if (branch.bindId) {
+        let bindBranchList = await BindBranchList.fromBranchAsync(branch);
+
+        let result = await bindBranchList.deleteSelfAsync(branch);
+        res.send(result)
+
+    } else {
+        // let hasChildIds = [];
+        // if (!branch.hasChild) {
+        //     hasChildIds.push(branch.id);
+        // }
+        // let childBranch = await branch.addAChildAsync(childKnlg);
+        // res.send({ childBranchList: [childBranch], hasChildIds })
+    }
+
+
+
+
+
+
+
+
+
+
+
+    // let result = await new Branch(id).deleteSelfAsync();
+
+    // res.send(result);
+
+});
+
+//修改parent
+router.put('/v1/changeParent', async (req, res) => {
+    let { id, newParentId } = req.body;
+
+    await new Branch(id).parentAsync(newParentId);
+    res.send('1')
+});
+
+
+router.post('/v1/copyAndBind', async (req, res) => {
+    let { id, newParentId } = req.body;
+
+    let result = await new Branch(id).copyAndBindAsync(newParentId);
+    res.send(result)
+});
+
+
+
 
 router.post('/v1/dataObjs', async (req, res) => {
 
@@ -44,7 +477,7 @@ router.post('/v1/dataObjs', async (req, res) => {
 });
 
 
-router.get('/v1/nextId', async (req, res) => {
+router.get('/v1/id', async (req, res) => {
     let sql = `SELECT AUTO_INCREMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA ='${pool.database}' AND TABLE_NAME='know'`;
 
     let result = await queryAsync(sql);
@@ -63,33 +496,9 @@ router.get('/v1/uniqueBindId', async (req, res) => {
 
 })
 
-//删除父元素及子元素(path填写父元素path)
-router.delete('/v1/dataObjs/pathLike/:path', async (req, res) => {
-    let $path = req.params.path;
-    let sql = 'DELETE FROM `know` WHERE `path` LIKE ?';
 
-    await queryAsync(sql, [$path + '%']);
-    res.send('1');
 
-});
 
-// 修改元素
-router.put('/v1/dataObj', async (req, res) => {
-    let obj = req.body;
-    let sql = 'UPDATE `know` SET ? WHERE `id`=?';
-
-    await queryAsync(sql, [obj, obj.id]);
-    res.send('1');
-
-    // pool.query(sql, [obj, obj.id], (err, result) => {
-    //     if (err) throw err;
-    //     if (result.affectedRows > 0) {
-    //         res.send('1');
-    //     } else {
-    //         res.send('0');
-    //     }
-    // })
-})
 
 
 // 修改绑定的元素的knlg
@@ -100,14 +509,6 @@ router.put('/v1/knlgsByBindId', async (req, res) => {
     await queryAsync(sql, [obj.knlg, obj.bindId]);
     res.send('1');
 
-    // pool.query(sql, [obj.knlg, obj.bindId], (err, result) => {
-    //     if (err) throw err;
-    //     if (result.affectedRows > 0) {
-    //         res.send('1');
-    //     } else {
-    //         res.send('0');
-    //     }
-    // })
 })
 
 // 获取绑定的元素
@@ -118,10 +519,7 @@ router.get('/v1/paths/bindId/:bindId', async (req, res) => {
 
     res.send(await queryAsync(sql, [bindId]));
 
-    // pool.query(sql, [bindId], (err, result) => {
-    //     if (err) throw err;
-    //     res.send(result);
-    // })
+
 })
 
 function queryAsync(sql, arr) {
@@ -138,7 +536,6 @@ function queryAsync(sql, arr) {
 
 router.delete('/v1/dataObjs/pathLikeAndBindId', async (req, res) => {
     let { pid, path, bindId } = req.body;
-    console.log(req.body)
 
     //获得要删除的其它绑定的分支
     let sqlGet = 'SELECT pid,path FROM know parent WHERE bindId=? AND ((SELECT bindId FROM `know` WHERE id = parent.pid) IS NOT NULL)';
@@ -146,7 +543,6 @@ router.delete('/v1/dataObjs/pathLikeAndBindId', async (req, res) => {
 
     let result = await queryAsync('SELECT bindId FROM know WHERE id=?', [pid]);
     let pBindId = result[0].bindId;
-    console.log(pBindId)
 
     if (pBindId) {
 
@@ -156,7 +552,6 @@ router.delete('/v1/dataObjs/pathLikeAndBindId', async (req, res) => {
             return queryAsync(sqlDel, [obj.path + '%']);
         }))
     } else {
-        console.log(path)
         await queryAsync(sqlDel, [path + '%']);
     }
 
@@ -173,15 +568,7 @@ router.delete('/v1/dataObjs/pathLikeAndBindId', async (req, res) => {
 
 })
 
-//获取父元素及子元素的path(path填写父元素path)
-router.get('/v1/paths/pathLike/:path', (req, res) => {
-    let $path = req.params.path;
-    let sql = 'SELECT `id`,`path` FROM `know` WHERE `path` LIKE ?';
-    pool.query(sql, [$path + '%'], (err, result) => {
-        if (err) throw err;
-        res.send(result);
-    })
-});
+
 
 //修改父元素的pid,path及子元素的path(path填写父元素path)
 router.put('/v1/dataObjs', async (req, res) => {
@@ -195,7 +582,6 @@ router.put('/v1/dataObjs', async (req, res) => {
     res.send('1')
 
 });
-
 
 
 
@@ -256,7 +642,8 @@ router.get('/v1/import', (req, res) => {
             pid INT,
             path VARCHAR(1000),
             orderNum INT,
-            bindId INT
+            bindId INT,
+            hasChild TINYINT
         )DEFAULT CHARACTER SET UTF8 COMMENT "知识"
         `
         pool.query(sql2, (err, result) => {
@@ -289,6 +676,15 @@ router.get('/v1/import', (req, res) => {
     })
 
 
+})
+
+router.get('/v1/addHasChild', async (req, res) => {
+    let result = await queryAsync('SELECT * FROM know');
+    for (let value of result) {
+        let arr = await queryAsync('SELECT * FROM know WHERE pid = ? LIMIT 1', [value.id]);
+        await queryAsync('UPDATE know SET hasChild=? WHERE id=?', [arr.length > 0 ? 1 : 0, value.id]);
+    }
+    res.send('1')
 })
 
 router.get('/v1/import/:filename', (req, res) => {
@@ -371,4 +767,4 @@ router.get('/v1/dataObjs/pathLike/:path', (req, res) => {
 
 
 
-module.exports = router;
+module.exports = { router, init };
