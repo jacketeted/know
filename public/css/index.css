@@ -1,0 +1,267 @@
+* {
+    margin: 0;
+    padding: 0;
+}
+
+#d1 {
+    width: max-content;
+    min-width: 100%;
+    height: 60vh;
+    overflow: auto;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+
+
+.tab {
+    border: 1px solid black;
+    cursor: pointer;
+    margin-right: 30px;
+    display: flex;
+    min-width: 20px;
+    min-height: 20px;
+}
+
+.tab>span {
+    padding: 5px;
+}
+
+
+
+li {
+    display: flex;
+    align-items: center;
+
+
+}
+
+li:not(:last-child) {
+    margin-bottom: 20px;
+}
+
+.branch.selected>.tab {
+    border: 2px solid red !important;
+    margin: -1px 29px -1px -1px;
+}
+
+.branch.green-selected>.tab {
+    background-color: rgb(92, 170, 92);
+    margin: -1px 29px -1px -1px;
+}
+
+
+
+
+ul {
+    list-style: none;
+    border-left: 1px solid black;
+    padding: 0;
+}
+
+#d2 {
+    /* position: absolute; */
+    position: relative;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    /* height: 30vh; */
+    height: 300px;
+    min-height: 100px;
+
+
+}
+
+#d4 {
+    position: absolute;
+    display: none;
+    background-color: wheat;
+    z-index: 300;
+    padding: 20px;
+
+}
+
+
+#d2>textarea {
+    width: 100%;
+    height: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+    font: 20px 微软雅黑;
+    outline: 0;
+    border: 1px solid black
+}
+
+.basic-function {
+    position: absolute;
+    bottom: 15px;
+    right: 15px;
+
+}
+
+.move-function {
+    position: absolute;
+    bottom: 65px;
+    right: 15px;
+}
+
+.extra-function {
+    position: absolute;
+    bottom: 15px;
+    right: 330px;
+}
+
+.copy-function {
+    position: absolute;
+    bottom: 65px;
+    right: 400px;
+}
+
+.basic-function button,
+.move-function button,
+.extra-function button,
+.copy-function button {
+    font-size: 18px;
+    padding: 5px;
+}
+
+.copy-function{
+    display: none;
+}
+
+
+.extra-function button:not(:disabled):not(.toggle-mode):not(.important):not(.search):not(.sleep) {
+    opacity: .8;
+    color: white;
+    border: 0;
+}
+
+.extra-function .example:not(:disabled) {
+
+    background-color: red;
+}
+
+.extra-function .toggle:not(:disabled) {
+    background-color: orange;
+}
+
+.extra-function .source:not(:disabled) {
+    background-color: green;
+}
+
+.basic-function button:not(:first-child),
+.move-function button:not(:first-child),
+.extra-function button:not(:first-child) {
+    margin-left: 10px;
+}
+
+.basic-function .add {
+    font-size: 21px;
+    vertical-align: bottom;
+}
+
+
+.search-box {
+    position: absolute;
+    bottom: 170px;
+    left: 50%;
+    background-color: white;
+    border: 1px solid black;
+    padding: 20px;
+}
+
+#d2>.example {
+    position: absolute;
+    bottom: 10px;
+    right: 330px;
+    font-size: 20px;
+}
+
+.hide {
+    display: none !important;
+}
+
+#d3 {
+    position: fixed;
+    z-index: 100;
+    bottom: 29vh;
+    width: 500px;
+    max-height: 500px;
+    padding: 15px;
+    border: 1px solid #888;
+    background-color: white;
+    overflow: auto;
+    right: 0;
+    display: none;
+}
+
+.branch.has-example>.tab>span {
+    background-color: rgb(226, 226, 177);
+}
+
+.definition {
+    background-color: #ccc;
+    /* background-color: wheat; */
+}
+
+.keyword {
+    color: blue;
+}
+
+.reserved {
+    color: blueviolet;
+}
+
+.attribute {
+    color: rgb(189, 79, 174);
+}
+
+.value {
+    color: orangered;
+}
+
+.comment {
+    color: green;
+}
+
+
+.has-child>.tab>.btn {
+    display: flex;
+}
+
+.btn {
+    cursor: pointer;
+    display: none;
+    width: 30px;
+    align-items: center;
+    justify-content: center;
+}
+
+.indicator {
+    opacity: .6;
+}
+
+.branch>ul {
+    display: none;
+}
+
+.branch.expanded>ul {
+    display: block;
+}
+
+.btn::after,
+.branch.expanded>.tab>.btn::after {
+    border: 7px solid;
+    display: inline-block;
+    content: "";
+}
+
+.btn::after {
+    margin-left: 7px;
+    border-color: transparent transparent transparent #777;
+}
+
+.branch.expanded>.tab>.btn::after {
+    margin-left: -3.5px;
+    border-color: transparent #777 transparent transparent;
+}

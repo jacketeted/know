@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="js/jquery.min.js"></script>
+    <script src="js/know/Base.js"></script>
+    <script src="js/know/RegRule.js"></script>
+    <script src="js/know/Code.js"></script>
+
+    <script src="js/know/DataObj.js"></script>
+</head>
+
+<body>
+    <!-- <button id="b1">转换数据库中的文本为text格式</button><br><br> -->
+    <!-- <button id="b2">转换数据库中的文本为html格式</button><br><br> -->
+    <!-- <button id="b3">转换数据库中的my定义</button><br><br> -->
+    <button id="b4">导出</button><br><br>
+    <!-- <button id="b5">导入</button><br><br> -->
+    <!-- <button id="b6">转换数据库中的pid为(pid)</button><br><br>
+    <button id="b7">转换数据库中的(pid)为pid</button><br><br> -->
+    <!-- <button id="b8">给数据库中的元素添加oderNum</button><br><br> -->
+    <!-- <button id="b9">给数据库中的元素添加bindId</button><br><br> -->
+    <!-- <button id="b10">给数据库中的元素移除bindId</button><br><br> -->
+
+    <script>
+        $('#b1').click(function () {
+
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    arr.forEach(elem => {
+                        elem.knlg = transToText(elem.knlg);
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+        })
+        $('#b2').click(function () {
+
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    arr.forEach(elem => {
+                        elem.knlg = transToHtml(elem.knlg);
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b3').click(function () {
+
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    arr.forEach(elem => {
+                        elem.knlg = changeMyDefinition(elem.knlg);
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b4').click(function () {
+
+            $.know.Database.exportAsync()
+                .then(() => alert('导出成功'));
+
+
+        })
+        $('#b5').click(function () {
+            if (!confirm('是否真的要导入')) return;
+
+            $.know.Database.importAsync()
+                .then(() => alert('导入成功'));
+
+
+        })
+
+        $('#b6').click(function () {
+
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    arr.forEach(elem => {
+                        console.log(elem.pid)
+                        elem.pid = `(${elem.pid})`
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b7').click(function () {
+
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    arr.forEach(elem => {
+                        console.log(elem.pid)
+                        elem.pid = elem.pid.slice(1, -1);
+                        console.log(elem.pid)
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b8').click(function () {
+
+            let obj = {}
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+
+                    arr.forEach(elem => {
+                        if (!obj[elem.pid]) {
+                            obj[elem.pid] = 1;
+                        } else {
+                            obj[elem.pid]++;
+                        }
+                        elem.orderNum = obj[elem.pid];
+                    })
+                    arr.sort((a, b) => a.pid - b.pid);
+                    console.log(arr)
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b9').click(function () {
+
+            let obj = {}
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+
+                    arr.forEach(elem => {
+                        elem.bindId = elem.id;
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+        $('#b10').click(function () {
+
+            let obj = {}
+            $.know.Database.getAllDataObjsAsync()
+                .then((arr) => {
+                    console.log(arr)
+                    arr.forEach(elem => {
+                        elem.bindId = null;
+                    })
+                    return $.know.Database.updateDataObjsAsync(arr);
+                })
+
+
+        })
+
+
+
+        function transToText(str) {
+            return str.replaceAll(/<br>|&lt;|&gt;|&amp;|&nbsp;|&#37;/g, function (keyword) {
+                switch (keyword) {
+                    case '<br>':
+                        return '\n';
+                    case '&lt;':
+                        return '<';
+                    case '&gt;':
+                        return '>';
+                    case '&amp;':
+                        return '&';
+                    case '&nbsp;':
+                        return ' ';
+                    case '&#37;':
+                        return '%'
+                }
+            })
+        }
+
+        function transToHtml(str) {
+            //此处加入了去除前后置换行符的功能
+            //^\n+|\n+$必须放在前面
+            return str.replaceAll(/[\n&<> %]/g, function (keyword) {
+                switch (keyword) {
+                    case '\n':
+                        return '<br>';
+                    case '<':
+                        return '&lt;'
+                    case '>':
+                        return '&gt;'
+                    case '&':
+                        return '&amp;'
+                    case ' ':
+                        return '&nbsp;'
+                    case '%':
+                        return '&#37;'
+                }
+            })
+        }
+
+        function changeMyDefinition(str) {
+
+            return str.replaceAll(/<my定义>(.|\n)+?\((.|\n)+?\)/g, (kw) => {
+                let i = kw.indexOf('(');
+
+                let def = kw.slice(i + 1, -1);
+                let word = kw.slice(6, i);
+
+                return `<my定义>${word}{(${def})}`;
+            });
+        }
+    </script>
+</body>
+
+</html>
