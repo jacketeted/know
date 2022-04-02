@@ -263,7 +263,13 @@ class Database {
             method: 'get',
             type: 'json'
         })
-            .then(dataObjs => dataObjs)
+    }
+    static getRootAsync() {
+        return $.ajax({
+            url: `/know/v1/root`,
+            method: 'get',
+            type: 'json'
+        })
     }
 
     static deleteSelfAsync(id) {
@@ -307,21 +313,8 @@ class Database {
             type: 'json'
         });
     }
-    static getUniqueBindIdAsync() {
-        return $.ajax({
-            url: `/know/v1/uniqueBindId`,
-            method: 'get',
-            type: 'json'
-        });
-    }
 
-    static getPathsByBindIdAsync(bindId) {
-        return $.ajax({
-            url: `/know/v1/paths/bindId/${bindId}`,
-            method: 'get',
-            type: 'json'
-        })
-    }
+
 
 
     static updateDataObjsAsync(arr) {

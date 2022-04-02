@@ -289,7 +289,7 @@ $.know.Branch = class {
 
         this.bind$elem();
         this.dataObj = dataObj;
-        this.hasChild = Boolean(this.dataObj.cid);
+        this.hasChild = Boolean(this.dataObj.hasChild);
         delete this.dataObj.cid;
         //可以少一个请求,避免冲突
         if (!this.hasChild) this._childContructed = true;
@@ -632,7 +632,7 @@ $.know.Branch = class {
     static async createRootAsync() {
         let $ul = $('<ul></ul>');
 
-        let arr = await Database.getChildrenAsync(0)
+        let arr = await Database.getRootAsync()
 
         let $elems = arr.map(dataObj => {
 

@@ -48,9 +48,6 @@ let $mainUl;
         await Database.idAsync()
     );
 
-    $.know.Branch.bindIdAllocator.init(
-        await $.know.Database.getUniqueBindIdAsync()
-    );
     let $ul = await $.know.Branch.createRootAsync();
 
     $d1.append($ul);
