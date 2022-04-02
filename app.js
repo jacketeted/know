@@ -1,6 +1,5 @@
 const express = require('express');
-const { router: knowRouter} = require('./routes/know');
-// const { router: knowRouter, init } = require('./routes/know');
+const { router: knowRouter, init } = require('./routes/know');
 
 let app = express();
 
@@ -14,7 +13,7 @@ app.use('/know', knowRouter);
 
 
 (async () => {
-    // await init();
+    await init();
     app.listen(9060);
 
 })()
